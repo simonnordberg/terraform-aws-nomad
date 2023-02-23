@@ -2,7 +2,7 @@
   "min_packer_version": "0.12.0",
   "variables": {
     "aws_region": "eu-west-1",
-    "nomad_version": "1.4.3",
+    "nomad_version": "1.4.4",
     "nomad_module_version": "v0.10.0",
     "consul_module_version": "v0.11.0",
     "consul_version": "1.14.4",
@@ -34,8 +34,9 @@
   ],
   "provisioners": [
     {
-      "type": "shell",
-      "script": "{{template_dir}}/setup_ubuntu.sh"
+      "type" : "shell",
+      "script" : "{{template_dir}}/setup_ubuntu.sh",
+      "execute_command" : "/usr/bin/cloud-init status --wait && sh '{{ .Path }}'"
     },
     {
       "type": "shell",
@@ -45,9 +46,17 @@
       "pause_before": "5s"
     },
     {
+      "type": "shell",
+      "inline": [
+        "mkdir -p /tmp/terraform-aws-nomad"
+      ]
+    },
+    {
       "type": "file",
-      "source": "{{template_dir}}/../../terraform-aws-nomad",
-      "destination": "/tmp"
+      "sources": [
+        "{{template_dir}}/../../terraform-aws-nomad/modules"
+      ],
+      "destination": "/tmp/terraform-aws-nomad"
     },
     {
       "type": "shell",
