@@ -46,13 +46,13 @@ variable "instance_type" {
 variable "num_servers" {
   description = "The number of server nodes to deploy. We strongly recommend using 3 or 5."
   type        = number
-  default     = 3
+  default     = 1
 }
 
 variable "num_clients" {
   description = "The number of client nodes to deploy. You can deploy as many as you need to run your jobs."
   type        = number
-  default     = 6
+  default     = 1
 }
 
 variable "cluster_tag_key" {
@@ -70,12 +70,12 @@ variable "cluster_tag_value" {
 variable "ssh_key_name" {
   description = "The name of an EC2 Key Pair that can be used to SSH to the EC2 Instances in this cluster. Set to an empty string to not associate a Key Pair."
   type        = string
-  default     = ""
+  default     = "nomad"
 }
 
-variable "vpc_id" {
-  description = "The ID of the VPC in which the nodes will be deployed.  Uses default VPC if not supplied."
-  type        = string
-  default     = ""
-}
+#variable "vpc_id" {
+#  description = "The ID of the VPC in which the nodes will be deployed.  Uses default VPC if not supplied."
+#  type        = string
+#  default     = "vpc-0d75c3b089a2188e6"
+#}
 

@@ -34,9 +34,7 @@ terraform {
 # ---------------------------------------------------------------------------------------------------------------------
 data "aws_ami" "nomad_consul" {
   most_recent = true
-
-  # If we change the AWS Account in which test are run, update this value.
-  owners = ["562637147889"]
+  owners      = ["self"]
 
   filter {
     name   = "virtualization-type"
@@ -45,12 +43,12 @@ data "aws_ami" "nomad_consul" {
 
   filter {
     name   = "is-public"
-    values = ["true"]
+    values = ["false"]
   }
 
   filter {
     name   = "name"
-    values = ["nomad-consul-ubuntu-*"]
+    values = ["nomad-consul-docker-ubuntu*"]
   }
 }
 
@@ -60,10 +58,14 @@ data "aws_ami" "nomad_consul" {
 # ---------------------------------------------------------------------------------------------------------------------
 
 module "servers" {
-  source = "github.com/hashicorp/terraform-aws-consul//modules/consul-cluster?ref=v0.8.0"
+  source                      = "github.com/simonnordberg/terraform-aws-consul//modules/consul-cluster"
+  associate_public_ip_address = true
 
-  cluster_name  = "${var.cluster_name}-server"
-  cluster_size  = var.num_servers
+  cluster_name     = "${var.cluster_name}-server"
+  min_size         = var.num_servers
+  max_size         = var.num_servers
+  desired_capacity = var.num_servers
+
   instance_type = var.server_instance_type
 
   # The EC2 Instances will use these tags to automatically discover each other and form a cluster
@@ -73,15 +75,15 @@ module "servers" {
   ami_id    = var.ami_id == null ? data.aws_ami.nomad_consul.image_id : var.ami_id
   user_data = data.template_file.user_data_server.rendered
 
-  vpc_id     = data.aws_vpc.default.id
-  subnet_ids = data.aws_subnet_ids.default.ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = [aws_subnet.main.id]
 
   # To make testing easier, we allow requests from any IP address here but in a production deployment, we strongly
   # recommend you limit this to the IP address ranges of known, trusted servers inside your VPC.
   allowed_ssh_cidr_blocks = ["0.0.0.0/0"]
 
   allowed_inbound_cidr_blocks = ["0.0.0.0/0"]
-  ssh_key_name                = var.ssh_key_name
+  ssh_key_name                = aws_key_pair.main.key_name
 
   tags = [
     {
@@ -134,7 +136,8 @@ module "clients" {
   # When using these modules in your own templates, you will need to use a Git URL with a ref attribute that pins you
   # to a specific version of the modules, such as the following example:
   # source = "github.com/hashicorp/terraform-aws-nomad//modules/nomad-cluster?ref=v0.0.1"
-  source = "./modules/nomad-cluster"
+  source                      = "./modules/nomad-cluster"
+  associate_public_ip_address = true
 
   cluster_name  = "${var.cluster_name}-client"
   instance_type = var.instance_type
@@ -145,23 +148,22 @@ module "clients" {
 
   # To keep the example simple, we are using a fixed-size cluster. In real-world usage, you could use auto scaling
   # policies to dynamically resize the cluster in response to load.
-  min_size = var.num_clients
-
+  min_size         = var.num_clients
   max_size         = var.num_clients
   desired_capacity = var.num_clients
 
   ami_id    = var.ami_id == null ? data.aws_ami.nomad_consul.image_id : var.ami_id
   user_data = data.template_file.user_data_client.rendered
 
-  vpc_id     = data.aws_vpc.default.id
-  subnet_ids = data.aws_subnet_ids.default.ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = [aws_subnet.main.id]
 
   # To make testing easier, we allow Consul and SSH requests from any IP address here but in a production
   # deployment, we strongly recommend you limit this to the IP address ranges of known, trusted servers inside your VPC.
   allowed_ssh_cidr_blocks = ["0.0.0.0/0"]
 
   allowed_inbound_cidr_blocks = ["0.0.0.0/0"]
-  ssh_key_name                = var.ssh_key_name
+  ssh_key_name                = aws_key_pair.main.key_name
 
   tags = [
     {
@@ -179,7 +181,7 @@ module "clients" {
 # ---------------------------------------------------------------------------------------------------------------------
 
 module "consul_iam_policies" {
-  source = "github.com/hashicorp/terraform-aws-consul//modules/consul-iam-policies?ref=v0.8.0"
+  source = "../terraform-aws-consul/modules/consul-iam-policies"
 
   iam_role_id = module.clients.iam_role_id
 }
@@ -205,14 +207,71 @@ data "template_file" "user_data_client" {
 # and private subnets.
 # ---------------------------------------------------------------------------------------------------------------------
 
-data "aws_vpc" "default" {
-  default = var.vpc_id == "" ? true : false
-  id      = var.vpc_id
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "nomad-vpc"
+  }
 }
 
-data "aws_subnet_ids" "default" {
-  vpc_id = data.aws_vpc.default.id
+resource "aws_vpc_dhcp_options" "main" {
+  domain_name_servers = ["AmazonProvidedDNS"]
+}
+
+resource "aws_vpc_dhcp_options_association" "main" {
+  vpc_id          = aws_vpc.main.id
+  dhcp_options_id = aws_vpc_dhcp_options.main.id
+}
+
+resource "aws_route_table" "main" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+}
+
+resource "aws_main_route_table_association" "main" {
+  vpc_id         = aws_vpc.main.id
+  route_table_id = aws_route_table.main.id
+}
+
+resource "aws_subnet" "main" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "eu-west-1a"
+}
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+}
+
+resource "tls_private_key" "main" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
 }
 
 data "aws_region" "current" {
+}
+
+resource "aws_key_pair" "main" {
+  key_name   = var.ssh_key_name
+  public_key = tls_private_key.main.public_key_openssh
+
+  provisioner "local-exec" {
+    command = "echo '${tls_private_key.main.private_key_pem}' > ./${var.ssh_key_name}_${formatdate("YYYYMMDDhhmm", timestamp())}.pem"
+  }
+}
+
+resource "aws_security_group_rule" "allow_port8080_inbound" {
+  type        = "ingress"
+  from_port   = 8080
+  to_port     = 8080
+  protocol    = "tcp"
+  cidr_blocks = ["0.0.0.0/0"]
+  security_group_id = module.clients.security_group_id
 }
